@@ -1,0 +1,575 @@
+/* --- Estilos para Banners y Contenedor Principal --- */
+.main-header, .main-footer {
+    background-color: #1c3d5a;
+    color: white;
+    text-align: center;
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+.main-header h3, .main-footer p {
+    margin: 0;
+    color: white;
+}
+
+.app-container {
+    /* Estos estilos antes estaban en 'body' */
+    max-width: 1000px;
+    margin: 40px auto;
+    padding: 20px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    border-radius: 8px;
+    background-color: white;
+}
+
+body {
+    /* Limpiamos el body para que solo sea el fondo */
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    background-color: #f0f2f5;
+    color: #333;
+    margin: 20px;
+    padding: 0;
+}
+
+/* --- Estilos Generales y Base --- */
+h1, h2, h3, h4 {
+    color: #1c3d5a;
+    text-align: center;
+}
+
+form {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    margin-bottom: 30px;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+}
+
+input[type="text"],
+input[type="number"],
+input[type="email"],
+select {
+    padding: 10px;
+    font-size: 16px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+button {
+    padding: 12px;
+    font-size: 16px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #0056b3;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #eee;
+    margin: 30px 0;
+}
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* --- Estilos para Ocultar/Mostrar Materias --- */
+.filtro-visibilidad {
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#lista-materias > div {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #f9f9f9;
+    border: 1px solid #eee;
+    padding: 15px;
+    margin-bottom: 10px;
+    border-radius: 5px;
+}
+
+.controles-materia {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.info-materia.oculta h3,
+.info-materia.oculta p {
+    color: #999;
+    text-decoration: line-through;
+}
+
+.botones {
+    display: flex;
+    gap: 10px;
+}
+
+.boton-editar {
+    background-color: #ffc107;
+    color: black;
+}
+.boton-editar:hover {
+    background-color: #e0a800;
+}
+
+.boton-eliminar {
+    background-color: #dc3545;
+}
+.boton-eliminar:hover {
+    background-color: #c82333;
+}
+
+.boton-cerrar-semestre {
+    background-color: #581c87;
+}
+.boton-cerrar-semestre:hover {
+    background-color: #3b0764;
+}
+
+/* --- Estilos para el Modal de Edición --- */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.5);
+}
+
+.modal-contenido {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%;
+    max-width: 500px;
+    border-radius: 8px;
+}
+
+.cerrar-modal {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.cerrar-modal:hover,
+.cerrar-modal:focus {
+    color: black;
+}
+
+/* --- Estilos para la Navegación por Pestañas --- */
+.navegacion-tabs {
+    border-bottom: 2px solid #ccc;
+    margin-bottom: 20px;
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.tab-link {
+    background-color: transparent;
+    border: none;
+    padding: 15px 20px;
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+    border-bottom: 3px solid transparent;
+}
+
+.tab-link:hover {
+    background-color: #f1f1f1;
+}
+
+.tab-link.active {
+    color: #007bff;
+    border-bottom: 3px solid #007bff;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* --- Estilos para la Gestión de Alumnos --- */
+#btn-volver-dashboard {
+    margin-bottom: 20px;
+    background-color: #6c757d;
+}
+#btn-volver-dashboard:hover {
+    background-color: #5a6268;
+}
+
+.gestion-container {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 30px;
+}
+
+.form-container, .lista-container {
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+#lista-alumnos div {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+#lista-alumnos div:last-child {
+    border-bottom: none;
+}
+
+/* --- Estilos para el Control de Asistencia --- */
+#asistencia-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 30px;
+    margin-top: 20px;
+}
+
+.controles-asistencia, .qr-container, .lista-asistencia-hoy {
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.botones-sesion {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 10px;
+}
+.botones-sesion button {
+    flex: 1;
+}
+
+#qrcode {
+    width: 128px;
+    height: 128px;
+    margin: 20px auto;
+    padding: 5px;
+    border: 1px solid #ddd;
+}
+
+#btn-terminar-asistencia {
+    width: 100%;
+    margin-top: 10px;
+    background-color: #dc3545;
+}
+#btn-terminar-asistencia:hover {
+    background-color: #c82333;
+}
+
+#lista-alumnos-asistencia {
+    text-align: left;
+}
+
+#lista-alumnos-asistencia .alumno-item {
+    display: flex;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+}
+
+#lista-alumnos-asistencia input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin-right: 15px;
+}
+
+.seleccion-unidad {
+    margin-bottom: 15px;
+}
+.seleccion-unidad label {
+    margin-right: 10px;
+}
+#btn-guardar-asistencia-sheet {
+    width: 100%;
+    margin-top: 15px;
+    background-color: #28a745;
+}
+#btn-guardar-asistencia-sheet:hover {
+    background-color: #218838;
+}
+
+/* --- Estilos para el Calificador de Actividades --- */
+#calificador-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-top: 20px;
+}
+
+#archivos-calificar-container, #rubrica-container {
+    border: 1px solid #ddd;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.controles-seleccion {
+    margin-bottom: 15px;
+    display: flex;
+    gap: 10px;
+}
+
+.controles-seleccion button {
+    background-color: #6c757d;
+    padding: 5px 10px;
+    font-size: 14px;
+}
+
+#lista-archivos-actividades .archivo-item {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    border-bottom: 1px solid #eee;
+}
+#lista-archivos-actividades input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    margin-right: 15px;
+}
+
+#prompt-calificacion {
+    width: 100%;
+    padding: 10px;
+    font-size: 16px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+    margin-bottom: 15px;
+    box-sizing: border-box;
+}
+
+#btn-iniciar-calificacion-ia {
+    width: 100%;
+    background-color: #17a2b8;
+}
+#btn-iniciar-calificacion-ia:hover {
+    background-color: #138496;
+}
+
+/* --- Estilos para Calificación de Reportes --- */
+#lista-archivos-reportes .reporte-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+#lista-archivos-reportes .info-reporte {
+    flex-grow: 1;
+}
+
+#lista-archivos-reportes .calificacion-reporte {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#lista-archivos-reportes .calificacion-reporte input {
+    width: 80px;
+    text-align: center;
+}
+
+/* --- Estilos para el Módulo de Evaluaciones --- */
+#evaluaciones-container {
+    display: grid;
+    grid-template-columns: 1fr 2fr;
+    gap: 30px;
+    margin-top: 20px;
+}
+
+.crear-evaluacion, .lista-evaluaciones {
+    border: 1px solid #ddd;
+    padding: 20px;
+    border-radius: 8px;
+}
+
+.crear-evaluacion button {
+    width: 100%;
+}
+
+#evaluaciones-listado .evaluacion-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 10px;
+    border-bottom: 1px solid #eee;
+}
+
+/* --- Estilos para el Módulo de Calificaciones --- */
+#ponderacion-container {
+    max-width: 600px;
+    margin: 20px auto;
+    padding: 20px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+}
+
+.campos-ponderacion {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+}
+
+.campo-item {
+    display: flex;
+    flex-direction: column;
+}
+
+.campo-item label {
+    margin-bottom: 5px;
+    font-weight: bold;
+}
+
+.total-ponderacion {
+    text-align: right;
+    font-size: 1.2em;
+    margin-bottom: 20px;
+}
+
+#btn-guardar-ponderacion {
+    width: 100%;
+    margin-bottom: 20px;
+}
+
+#btn-calcular-unidad {
+    width: 100%;
+    background-color: #dc3545;
+}
+#btn-calcular-unidad:hover {
+    background-color: #c82333;
+}
+
+#resultados-calificacion {
+    margin-top: 20px;
+}
+#reporte-final-container table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 10px;
+}
+#reporte-final-container th, #reporte-final-container td {
+    border: 1px solid #ddd;
+    padding: 8px;
+    text-align: left;
+}
+#reporte-final-container th {
+    background-color: #f2f2f2;
+}
+
+/* --- Estilos para Material Didáctico --- */
+#lista-material-didactico .material-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 10px;
+    border-bottom: 1px solid #eee;
+}
+
+#lista-material-didactico .controles-material {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.switch {
+    position: relative;
+    display: inline-block;
+    width: 60px;
+    height: 34px;
+}
+.switch input { 
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #ccc;
+    transition: .4s;
+    border-radius: 34px;
+}
+.slider:before {
+    position: absolute;
+    content: "";
+    height: 26px;
+    width: 26px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+input:checked + .slider {
+    background-color: #2196F3;
+}
+input:checked + .slider:before {
+    transform: translateX(26px);
+}
+
+/* --- Estilos para los Paneles de Alumno --- */
+#login-estudiante, #panel-asistencia {
+    max-width: 500px;
+    margin: 50px auto;
+    padding: 30px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    text-align: center;
+}
+
+#info-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 30px;
+    margin-top: 20px;
+}
+
+#calificaciones-estudiante, #material-didactico-estudiante {
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    padding: 20px;
+}
+
+#material-contenido .material-item-estudiante {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+#material-contenido .material-item-estudiante:last-child {
+    border-bottom: none;
+}

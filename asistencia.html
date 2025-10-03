@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registro de Asistencia</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="main-header">
+        <h3>Institución Educativa (Tu Banner Aquí)</h3>
+    </header>
+
+    <div class="app-container">
+        <div id="panel-asistencia">
+            <h1>Registro de Asistencia</h1>
+            <p id="mensaje">Ingresa tu matrícula para registrar tu asistencia.</p>
+            <form id="form-registro-asistencia">
+                <input type="text" id="matricula" placeholder="Tu Matrícula" required>
+                <button type="submit">Registrar</button>
+            </form>
+        </div>
+    </div>
+
+    <footer class="main-footer">
+        <p>Plataforma creada por: Tu Nombre / Nombre de tu Empresa</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
+    <script src="asistencia.js"></script>
+</body>
+</html>

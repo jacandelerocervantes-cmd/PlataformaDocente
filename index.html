@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plataforma de Apoyo Docente</title>
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+</head>
+<body>
+
+    <header class="main-header">
+        <h3>Institución Educativa (Tu Banner Aquí)</h3>
+    </header>
+
+    <div class="app-container">
+        <div id="auth-section">
+            <h1>Plataforma de Apoyo Docente</h1>
+            <p>Por favor, inicia sesión con tu cuenta de Google para continuar.</p>
+            <button id="login-button">Iniciar Sesión con Google</button>
+        </div>
+
+        <div id="main-content" style="display: none;">
+            <div class="header">
+                <h2>Bienvenido, <span id="user-name"></span></h2>
+                <button id="logout-button">Cerrar Sesión</button>
+            </div>
+            <hr>
+
+            <div id="vista-dashboard">
+                <form id="form-materia">
+                    <h3>Nueva Materia</h3>
+                    <input type="text" id="nombre-materia" placeholder="Nombre de la materia" required>
+                    <input type="text" id="semestre-materia" placeholder="Semestre (ej. 2025-1)" required>
+                    <input type="number" id="unidades-materia" placeholder="Número de unidades" required>
+                    <button type="submit">Guardar y Crear Carpetas</button>
+                </form>
+                <h2>Mis Materias</h2>
+                <div class="filtro-visibilidad">
+                    <input type="checkbox" id="mostrar-ocultas-checkbox">
+                    <label for="mostrar-ocultas-checkbox">Mostrar materias ocultas</label>
+                </div>
+                <div id="lista-materias"></div>
+            </div>
+
+            <div id="vista-gestion-materia" style="display: none;">
+                <button id="btn-volver-dashboard">&larr; Volver a Mis Materias</button>
+                <h2 id="nombre-materia-gestion"></h2>
+
+                <div class="navegacion-tabs">
+                    <button class="tab-link active" data-tab="tab-alumnos-asistencia">Alumnos y Asistencia</button>
+                    <button class="tab-link" data-tab="tab-actividades">Actividades (IA)</button>
+                    <button class="tab-link" data-tab="tab-reportes">Reportes</button>
+                    <button class="tab-link" data-tab="tab-evaluaciones">Evaluaciones</button>
+                    <button class="tab-link" data-tab="tab-calificaciones">Calificaciones</button>
+                    <button class="tab-link" data-tab="tab-material">Material Didáctico</button>
+                </div>
+
+                <div id="tab-alumnos-asistencia" class="tab-content active">
+                    <h3>Gestión de Alumnos</h3>
+                    <div class="gestion-container">
+                        <div class="form-container">
+                            <h4>Añadir Alumno</h4>
+                            <form id="form-alumno">
+                                <input type="text" id="nombre-alumno" placeholder="Nombre completo" required>
+                                <input type="text" id="matricula-alumno" placeholder="Matrícula" required>
+                                <input type="email" id="correo-alumno" placeholder="Correo (opcional)">
+                                <button type="submit">Añadir Alumno</button>
+                            </form>
+                            <hr>
+                            <h4>Carga Masiva de Alumnos</h4>
+                            <p>Sube un archivo .csv con las columnas: <strong>nombre,matricula,correo</strong></p>
+                            <input type="file" id="csv-file-input" accept=".csv">
+                            <button id="btn-upload-csv">Procesar Archivo</button>
+                        </div>
+                        <div class="lista-container">
+                            <h4>Alumnos Inscritos</h4>
+                            <div id="lista-alumnos"></div>
+                        </div>
+                    </div>
+                    <hr>
+                    <h3>Control de Asistencia</h3>
+                    <div id="asistencia-container">
+                        <div class="controles-asistencia">
+                            <h4>Sesión de Asistencia</h4>
+                            <div class="seleccion-unidad">
+                                <label for="unidad-asistencia-select">Unidad Actual:</label>
+                                <select id="unidad-asistencia-select"></select>
+                            </div>
+                            <p>Selecciona qué sesión iniciar. El QR durará 5 minutos.</p>
+                            <div class="botones-sesion">
+                                <button id="btn-iniciar-sesion-1">Iniciar Sesión 1</button>
+                                <button id="btn-iniciar-sesion-2">Iniciar Sesión 2</button>
+                            </div>
+                            <button id="btn-terminar-asistencia" style="display: none;">Terminar Sesión Activa</button>
+                            <button id="btn-guardar-asistencia-sheet">Cerrar y Guardar Asistencia</button>
+                        </div>
+                        <div class="qr-container">
+                            <h4 id="qr-title">Código QR Inactivo</h4>
+                            <div id="qrcode"></div>
+                            <p id="qr-message">Selecciona una sesión para generar un código.</p>
+                        </div>
+                        <div class="lista-asistencia-hoy">
+                            <h4>Lista de Clase</h4>
+                            <div id="lista-alumnos-asistencia">
+                                <p>Selecciona una materia para ver la lista de alumnos.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-actividades" class="tab-content">
+                    <h3>Calificación de Actividades con IA</h3>
+                    <div class="seleccion-unidad-actividades">
+                        <label for="unidad-actividades-select">Selecciona la Unidad:</label>
+                        <select id="unidad-actividades-select"></select>
+                    </div>
+                    <div id="calificador-container">
+                        <div id="archivos-calificar-container">
+                            <h4>Entregas de Alumnos</h4>
+                            <div class="controles-seleccion">
+                                <button id="btn-seleccionar-todo">Seleccionar Todo</button>
+                                <button id="btn-deseleccionar-todo">Deseleccionar</button>
+                            </div>
+                            <div id="lista-archivos-actividades">
+                                <p>Selecciona una unidad para ver las entregas.</p>
+                            </div>
+                        </div>
+                        <div id="rubrica-container">
+                            <h4>Rúbrica de Calificación (Prompt)</h4>
+                            <textarea id="prompt-calificacion" rows="10" placeholder="Escribe aquí los criterios de evaluación..."></textarea>
+                            <button id="btn-iniciar-calificacion-ia">Calificar Trabajos Seleccionados</button>
+                            <div id="estado-calificacion"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-reportes" class="tab-content">
+                    <h3>Calificación de Reportes</h3>
+                    <div class="seleccion-unidad-reportes">
+                        <label for="unidad-reportes-select">Selecciona la Unidad:</label>
+                        <select id="unidad-reportes-select"></select>
+                    </div>
+                    <div id="lista-archivos-reportes">
+                        <p>Selecciona una unidad para ver los reportes entregados.</p>
+                    </div>
+                </div>
+
+                <div id="tab-evaluaciones" class="tab-content">
+                    <h3>Gestión de Evaluaciones</h3>
+                    <div class="seleccion-unidad-evaluaciones">
+                        <label for="unidad-evaluaciones-select">Selecciona la Unidad:</label>
+                        <select id="unidad-evaluaciones-select"></select>
+                    </div>
+                    <div id="evaluaciones-container">
+                        <div class="crear-evaluacion">
+                            <h4>Nueva Evaluación</h4>
+                            <input type="text" id="nombre-nueva-evaluacion" placeholder="Nombre de la evaluación">
+                            <button id="btn-crear-evaluacion">Crear Nuevo Formulario</button>
+                        </div>
+                        <div class="lista-evaluaciones">
+                            <h4>Evaluaciones Creadas</h4>
+                            <div id="evaluaciones-listado">
+                                <p>Selecciona una unidad para ver las evaluaciones.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-calificaciones" class="tab-content">
+                    <h3>Ponderación y Cálculo de Calificaciones</h3>
+                    <div class="seleccion-unidad-calificaciones">
+                        <label for="unidad-calificaciones-select">Selecciona la Unidad:</label>
+                        <select id="unidad-calificaciones-select"></select>
+                    </div>
+                    <div id="ponderacion-container">
+                        <h4>Definir Ponderación de la Unidad</h4>
+                        <div class="campos-ponderacion">
+                            <div class="campo-item">
+                                <label for="ponderacion-asistencia">Asistencia (%):</label>
+                                <input type="number" id="ponderacion-asistencia" min="0" max="100" value="10">
+                            </div>
+                            <div class="campo-item">
+                                <label for="ponderacion-actividades">Actividades (%):</label>
+                                <input type="number" id="ponderacion-actividades" min="0" max="100" value="40">
+                            </div>
+                            <div class="campo-item">
+                                <label for="ponderacion-reportes">Reportes (%):</label>
+                                <input type="number" id="ponderacion-reportes" min="0" max="100" value="20">
+                            </div>
+                            <div class="campo-item">
+                                <label for="ponderacion-evaluaciones">Evaluaciones (%):</label>
+                                <input type="number" id="ponderacion-evaluaciones" min="0" max="100" value="30">
+                            </div>
+                        </div>
+                        <div class="total-ponderacion">
+                            <strong>Total: <span id="total-ponderado">100</span>%</strong>
+                        </div>
+                        <button id="btn-guardar-ponderacion">Guardar Ponderación</button>
+                        <hr>
+                        <h4>Cálculo Final</h4>
+                        <p>Este proceso leerá todas las calificaciones, aplicará la ponderación y generará el reporte final de la unidad.</p>
+                        <button id="btn-calcular-unidad">Cerrar y Calcular Calificaciones</button>
+                        <div id="resultados-calificacion">
+                            <h4>Resultados del Cálculo</h4>
+                            <div id="reporte-final-container"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tab-material" class="tab-content">
+                    <h3>Gestión de Material Didáctico</h3>
+                    <div class="seleccion-unidad-material">
+                        <label for="unidad-material-select">Selecciona la Unidad:</label>
+                        <select id="unidad-material-select"></select>
+                    </div>
+                    <div id="lista-material-didactico">
+                        <p>Selecciona una unidad para gestionar el material.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="modal-editar" class="modal">
+            <div class="modal-contenido">
+                <span class="cerrar-modal">&times;</span>
+                <h2>Editar Materia</h2>
+                <form id="form-editar-materia">
+                    <input type="hidden" id="editar-id">
+                    <input type="text" id="editar-nombre" placeholder="Nombre de la materia" required>
+                    <input type="text" id="editar-semestre" placeholder="Semestre" required>
+                    <input type="number" id="editar-unidades" placeholder="Número de unidades" required>
+                    <button type="submit">Guardar Cambios</button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <footer class="main-footer">
+        <p>Plataforma creada por: Tu Nombre / Nombre de tu Empresa</p>
+    </footer>
+
+    <script src="config.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>

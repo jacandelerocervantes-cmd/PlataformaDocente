@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel del Estudiante</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="main-header">
+        <h3>Institución Educativa (Tu Banner Aquí)</h3>
+    </header>
+
+    <div class="app-container">
+        <div id="login-estudiante">
+            <h1>Panel del Estudiante</h1>
+            <p>Ingresa el código de la materia y tu matrícula para acceder.</p>
+            <form id="form-login-estudiante">
+                <input type="text" id="codigo-materia" placeholder="Código de la Materia" required>
+                <input type="text" id="matricula-estudiante" placeholder="Tu Matrícula" required>
+                <button type="submit">Ingresar</button>
+            </form>
+            <p id="login-error-message" style="color: red;"></p>
+        </div>
+
+        <div id="panel-principal-estudiante" style="display: none;">
+            <div class="header">
+                <h2>Bienvenido, <span id="nombre-estudiante"></span></h2>
+                <button id="btn-logout-estudiante">Cerrar Sesión</button>
+            </div>
+            <h3 id="nombre-materia-estudiante"></h3>
+            <hr>
+
+            <div class="seleccion-unidad-estudiante">
+                <label for="unidad-select-estudiante">Selecciona una Unidad:</label>
+                <select id="unidad-select-estudiante"></select>
+            </div>
+
+            <div id="info-container">
+                <div id="calificaciones-estudiante">
+                    <h4>Mi Progreso en la Unidad</h4>
+                    <div id="calificaciones-contenido">
+                        <p>Selecciona una unidad para ver tu progreso.</p>
+                    </div>
+                </div>
+                <div id="material-didactico-estudiante">
+                    <h4>Material Didáctico</h4>
+                    <div id="material-contenido">
+                        <p>Selecciona una unidad para ver el material.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="main-footer">
+        <p>Plataforma creada por: Tu Nombre / Nombre de tu Empresa</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="config.js"></script>
+    <script src="estudiante.js"></script>
+</body>
+</html>
