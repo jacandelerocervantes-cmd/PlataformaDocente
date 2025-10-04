@@ -174,27 +174,42 @@ const createGoogleSheet = async (fileName, parentId, accessToken) => {
     });
     return await response.json();
 };
+ /**
+ * REESTRUCTURADO: Envía los detalles de una nueva materia al backend
+ * para que este cree toda la estructura de carpetas y archivos en Drive.
+ * @param {object} materia - Un objeto con los detalles, ej: { nombre: 'Cálculo', semestre: '2025-1', unidades: 4 }
+ */
+async function createFolderStructure(materia) {
+    // Ya no necesitamos el token de acceso del usuario aquí. Toda la autenticación la hace el backend.
+    console.log("Enviando datos de la materia al backend:", materia);
+    alert('Iniciando creación de la estructura completa en Google Drive...');
 
-const createFolderStructure = async (materia) => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session || !session.provider_token) { alert('No se pudo crear la estructura.'); return; }
-    const accessToken = session.provider_token;
+    // APUNTAMOS A UNA NUEVA FUNCIÓN MÁS POTENTE QUE CREAREMOS
+    const functionUrl = "https://us-central1-proyecto-asistencia-471918.cloudfunctions.net/createMateriaStructure";
+
     try {
-        alert('Iniciando creación de carpetas y archivos en Google Drive...');
-        const raizAppId = await findOrCreateFolder('Plataforma de Apoyo Docente', 'root', accessToken);
-        const semestreId = await findOrCreateFolder(materia.semestre, raizAppId, accessToken);
-        const materiaId = await findOrCreateFolder(materia.nombre, semestreId, accessToken);
-        for (let i = 1; i <= materia.unidades; i++) {
-            const unidadFolderId = await findOrCreateFolder(`Unidad ${i}`, materiaId, accessToken);
-            await createGoogleSheet('asistencia', unidadFolderId, accessToken);
-            await createGoogleSheet('actividades', unidadFolderId, accessToken);
-            await createGoogleSheet('reportes', unidadFolderId, accessToken);
-            await createGoogleSheet('evaluaciones', unidadFolderId, accessToken);
-            await createGoogleSheet('ponderacion_unidad', unidadFolderId, accessToken);
+        const response = await fetch(functionUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            // Enviamos el objeto completo de la materia en el cuerpo de la solicitud
+            body: JSON.stringify(materia)
+        });
+
+        if (!response.ok) {
+            // Si hay un error, intentamos leer el mensaje de error del backend
+            const errorResult = await response.json();
+            throw new Error(errorResult.message || `Error del servidor: ${response.status}`);
         }
-        alert('¡Estructura de carpetas y archivos creada con éxito!');
-    } catch (error) { console.error('Error creando la estructura completa:', error); alert('Hubo un error al crear la estructura en Google Drive.'); }
-};
+
+        const result = await response.json();
+        console.log("Respuesta del backend:", result);
+        alert(`¡Estructura creada con éxito! ID de la carpeta principal de la materia: ${result.materiaFolderId}`);
+
+    } catch (error) {
+        console.error('Error llamando a la Cloud Function createMateriaStructure:', error);
+        alert(`Hubo un error al crear la estructura: ${error.message}`);
+    }
+}
 
 const guardarAsistenciaEnSheet = async () => {
     if (!materiaSeleccionada) return;

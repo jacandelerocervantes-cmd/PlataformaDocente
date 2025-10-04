@@ -1,1 +1,3 @@
 config.js
+google_credentials.json
+.env.yaml
