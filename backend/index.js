@@ -9,10 +9,12 @@ const { createClient } = require('@supabase/supabase-js');
 
 // --- 2. CONFIGURACIÓN E INICIALIZACIÓN DE APIS ---
 const auth = new google.auth.GoogleAuth({
+    // Permisos necesarios para gestionar Drive, Sheets y Forms
     scopes: [
         'https://www.googleapis.com/auth/drive',
         'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/forms.body'
+        'https://www.googleapis.com/auth/forms.body',
+        'https://www.googleapis.com/auth/forms.body.readonly' // Necesario para algunas operaciones de Forms
     ],
 });
 const drive = google.drive({ version: 'v3', auth });
@@ -22,6 +24,7 @@ const forms = google.forms({ version: 'v1', auth });
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 const supabase = createClient(supabaseUrl, supabaseKey);
+
 // --- 3. HELPER DE SEGURIDAD: VERIFICADOR DE AUTENTICACIÓN ---
 const getAuthenticatedUser = async (req) => {
     const authHeader = req.headers.authorization;
@@ -30,10 +33,14 @@ const getAuthenticatedUser = async (req) => {
     const { data: { user }, error } = await supabase.auth.getUser(token);
     if (error) throw new Error(`Error de autenticación: ${error.message}`);
     if (!user) throw new Error('Token inválido o expirado.');
-    console.log(`Solicitud autenticada para el usuario: ${user.id}`);
+    // Usamos el email para Drive y el ID para Supabase (como se define en el frontend)
+    console.log(`Solicitud autenticada para el usuario: ${user.email} (ID: ${user.id})`);
     return user;
 };
-// --- 4. HELPERS INTERNOS DE GOOGLE DRIVE ---
+
+// --- 4. HELPERS INTERNOS DE GOOGLE DRIVE Y SHEETS ---
+
+// **Drive: Creación y Búsqueda**
 const findOrCreateFolder = async (name, parentId) => {
     const query = `'${parentId}' in parents and name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
     let res = await drive.files.list({ q: query, fields: 'files(id)' });
@@ -42,570 +49,470 @@ const findOrCreateFolder = async (name, parentId) => {
     const createRes = await drive.files.create({ resource: meta, fields: 'id' });
     return createRes.data.id;
 };
+
+// **Drive: Creación de Hojas de Cálculo (Base)**
 const createGoogleSheet = async (name, parentId) => {
     const meta = { name, mimeType: 'application/vnd.google-apps.spreadsheet', parents: [parentId] };
     const res = await drive.files.create({ resource: meta, fields: 'id' });
     return res.data.id;
 };
 
-/**
- * Cloud Function que recibe los detalles de una materia y crea toda la
- * estructura de carpetas y archivos en el Google Drive de la Cuenta de Servicio.
- */
-/**
- * VERSIÓN HÍBRIDA: Crea la estructura en Drive Y guarda la metadata en Supabase.
- */
-functions.http('createMateriaStructure', async (req, res) => {
-    // ... (el código de CORS se mantiene igual) ...
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
-
+// **Drive: Compartición (Permisos)**
+const shareDriveItem = async (fileId, emailAddress, role = 'writer') => {
+    const permission = { 'type': 'user', 'role': role, 'emailAddress': emailAddress };
     try {
-        const materia = req.body;
-        // -- NUEVO: Obtener el ID del docente desde el token (esto lo implementaremos después) --
-        // Por ahora, lo simularemos. NECESITAREMOS el ID de un usuario de prueba de Supabase.
-        // Ve a Supabase > Authentication > Users y copia el UID de un usuario.
-        const docenteId = "PEGA_AQUI_EL_UID_DE_UN_USUARIO_DOCENTE_DE_PRUEBA"; 
-
-        if (!materia || !materia.nombre || !materia.semestre || !materia.unidades || !docenteId) {
-            return res.status(400).send({ message: 'Datos incompletos.' });
-        }
-
-        // --- PARTE 1: CREACIÓN EN GOOGLE DRIVE (sin cambios) ---
-        console.log('Iniciando creación en Drive para:', materia.nombre);
-        const raizAppId = await findOrCreateFolder('Plataforma de Apoyo Docente', 'root');
-
-        // -- Lógica para buscar o crear el semestre en Drive --
-        const semestreDriveQuery = `'${raizAppId}' in parents and name = '${materia.semestre}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
-        let semestreFolderResponse = await drive.files.list({ q: semestreDriveQuery, fields: 'files(id)' });
-        let semestreId;
-        if (semestreFolderResponse.data.files.length > 0) {
-            semestreId = semestreFolderResponse.data.files[0].id;
-        } else {
-            const createdSemestre = await drive.files.create({ resource: { name: materia.semestre, mimeType: 'application/vnd.google-apps.folder', parents: [raizAppId] }, fields: 'id' });
-            semestreId = createdSemestre.data.id;
-        }
-
-        const materiaId = await findOrCreateFolder(materia.nombre, semestreId);
-        const unidadesDriveData = [];
-        for (let i = 1; i <= materia.unidades; i++) {
-            const unidadFolderId = await findOrCreateFolder(`Unidad ${i}`, materiaId);
-            const asistenciaId = await createGoogleSheet('asistencia', unidadFolderId);
-            const actividadesId = await createGoogleSheet('actividades', unidadFolderId);
-            const reportesId = await createGoogleSheet('reportes', unidadFolderId);
-            const evaluacionesId = await createGoogleSheet('evaluaciones', unidadFolderId);
-            const ponderacionId = await createGoogleSheet('ponderacion_unidad', unidadFolderId);
-            unidadesDriveData.push({ numero: i, folderId: unidadFolderId, asistenciaId, actividadesId, reportesId, evaluacionesId, ponderacionId });
-        }
-
-        // --- PARTE 2: GUARDAR METADATA EN SUPABASE ---
-        console.log("Guardando metadata en Supabase...");
-
-        // 1. Insertar o encontrar el semestre en la tabla 'semestres'
-        let { data: semestreData, error: semestreError } = await supabase
-            .from('semestres')
-            .select('id')
-            .eq('nombre', materia.semestre)
-            .eq('docente_id', docenteId)
-            .single();
-
-        if (semestreError && semestreError.code !== 'PGRST116') { // PGRST116 = 'not found'
-            throw semestreError;
-        }
-        if (!semestreData) {
-            const { data, error } = await supabase
-                .from('semestres')
-                .insert({ nombre: materia.semestre, docente_id: docenteId, drive_folder_id: semestreId })
-                .select('id')
-                .single();
-            if (error) throw error;
-            semestreData = data;
-        }
-
-        // 2. Insertar la nueva materia
-        const { data: materiaData, error: materiaError } = await supabase
-            .from('materias')
-            .insert({
-                nombre: materia.nombre,
-                unidades_count: materia.unidades,
-                semestre_id: semestreData.id,
-                docente_id: docenteId,
-                drive_folder_id: materiaId
-            })
-            .select('id')
-            .single();
-        if (materiaError) throw materiaError;
-
-        // 3. Insertar las unidades
-        const unidadesParaInsertar = unidadesDriveData.map(u => ({
-            numero_unidad: u.numero,
-            materia_id: materiaData.id,
-            ponderacion: 0, // Ponderación inicial de 0
-            drive_folder_id: u.folderId,
-            asistencia_sheet_id: u.asistenciaId,
-            actividades_sheet_id: u.actividadesId,
-            reportes_sheet_id: u.reportesId,
-            evaluaciones_sheet_id: u.evaluacionesId,
-            ponderacion_sheet_id: u.ponderacionId
-        }));
-        const { error: unidadesError } = await supabase.from('unidades').insert(unidadesParaInsertar);
-        if (unidadesError) throw unidadesError;
-
-        console.log('¡Estructura híbrida creada con éxito!');
-        res.status(200).send({
-            message: 'Estructura creada en Drive y registrada en Supabase.',
-            materiaDriveFolderId: materiaId,
-            materiaDbId: materiaData.id
+        await drive.permissions.create({
+            fileId: fileId,
+            resource: permission,
+            sendNotificationEmail: true,
+            fields: 'id',
         });
-
+        console.log(`Compartido ${fileId} con ${emailAddress} como ${role}`);
     } catch (error) {
-        console.error('Error creando la estructura híbrida:', error);
-        res.status(500).send({ message: `Error interno: ${error.message}` });
+        if (error.code === 409) { console.log(`El item ya está compartido con ${emailAddress}.`); }
+        else { throw error; }
     }
-});
-// --- 5. RUTAS/FUNCIONES DEL API ---
+};
 
-// -- 5.1 GESTIÓN DE MATERIAS (SEGURAS) --
+// **Sheets: Estructuración (Inicialización de Asistencia)**
+const initAsistenciaSheet = async (sheetId) => {
+    const requests = [{
+        // Headers: Matrícula, Nombre + Columnas de asistencia (se asume llenado diario)
+        updateCells: {
+            rows: [{ values: [
+                { userEnteredValue: { stringValue: 'Matrícula' }, userEnteredFormat: { textFormat: { bold: true } } },
+                { userEnteredValue: { stringValue: 'Nombre Completo' }, userEnteredFormat: { textFormat: { bold: true } } },
+                { userEnteredValue: { stringValue: 'Día 1' }, userEnteredFormat: { textFormat: { bold: true } } },
+                { userEnteredValue: { stringValue: 'Día 2' }, userEnteredFormat: { textFormat: { bold: true } } },
+                { userEnteredValue: { stringValue: 'Día 3' }, userEnteredFormat: { textFormat: { bold: true } } },
+                { userEnteredValue: { stringValue: 'Día 4' }, userEnteredFormat: { textFormat: { bold: true } } },
+            ] }],
+            start: { sheetId: 0, rowIndex: 0, columnIndex: 0 },
+            fields: 'userEnteredValue,userEnteredFormat.textFormat'
+        }
+    }];
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests } });
+};
+
+// **Sheets: Estructuración (Inicialización de Actividades/Evaluaciones)**
+const initActividadesSheet = async (sheetId) => {
+    const requests = [{
+        // Headers: Matrícula, Nombre + Columna de Nota (Actividades o Evaluación)
+        updateCells: {
+            rows: [{ values: [
+                { userEnteredValue: { stringValue: 'Matrícula' }, userEnteredFormat: { textFormat: { bold: true } } },
+                { userEnteredValue: { stringValue: 'Nombre Completo' }, userEnteredFormat: { textFormat: { bold: true } } },
+                { userEnteredValue: { stringValue: 'Nota Final' }, userEnteredFormat: { textFormat: { bold: true } } }
+            ] }],
+            start: { sheetId: 0, rowIndex: 0, columnIndex: 0 },
+            fields: 'userEnteredValue,userEnteredFormat.textFormat'
+        }
+    }];
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests } });
+};
+
+// **Sheets: Estructuración (Inicialización de Ponderación)**
+const initPonderacionSheet = async (sheetId) => {
+    // Estructura de Ponderación
+    const values = [
+        ['Criterio', 'Ponderación (%)'],
+        ['Asistencia', ''],
+        ['Actividades', ''],
+        ['Reportes', ''],
+        ['Evaluaciones', ''],
+        ['Total (Debe sumar 100%)', '=SUM(B2:B5)'] 
+    ];
+    
+    // Escribir valores y fórmulas
+    await sheets.spreadsheets.values.update({
+        spreadsheetId: sheetId,
+        range: 'Sheet1!A1',
+        valueInputOption: 'USER_ENTERED',
+        requestBody: { values: values },
+    });
+    
+    // Renombrar la hoja y dar formato
+    const requests = [{
+        updateSheetProperties: { properties: { sheetId: 0, title: 'Ponderación de Unidad' }, fields: 'title' }
+    }, {
+        repeatCell: {
+            range: { sheetId: 0, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: 2 },
+            cell: { userEnteredFormat: { textFormat: { bold: true } } },
+            fields: 'userEnteredFormat.textFormat.bold'
+        }
+    }];
+
+    await sheets.spreadsheets.batchUpdate({ spreadsheetId: sheetId, requestBody: { requests } });
+};
+
+// --- 6. RUTAS/FUNCIONES DEL API (Cloud Functions) ---
+
+// -- 6.1 GESTIÓN DE MATERIAS (CREACIÓN DE ESTRUCTURA) --
 functions.http('createMateriaStructure', async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
     try {
         const user = await getAuthenticatedUser(req);
         const docenteId = user.id;
+        const docenteEmail = user.email; 
+
         const materia = req.body;
         if (!materia || !materia.nombre || !materia.semestre || !materia.unidades) return res.status(400).send({ message: 'Datos de materia incompletos.' });
         
+        // 1. Creación de Drive
         const raizAppId = await findOrCreateFolder('Plataforma de Apoyo Docente', 'root');
         const semestreId = await findOrCreateFolder(materia.semestre, raizAppId);
         const materiaFolderId = await findOrCreateFolder(materia.nombre, semestreId);
+        
+        // **AÑADIDO: Compartir la carpeta principal con el docente**
+        await shareDriveItem(materiaFolderId, docenteEmail, 'writer', true); 
+
         const unidadesDriveData = [];
         for (let i = 1; i <= materia.unidades; i++) {
             const unidadFolderId = await findOrCreateFolder(`Unidad ${i}`, materiaFolderId);
-            unidadesDriveData.push({ numero: i, folderId: unidadFolderId, aId: await createGoogleSheet('asistencia', unidadFolderId), acId: await createGoogleSheet('actividades', unidadFolderId), rId: await createGoogleSheet('reportes', unidadFolderId), eId: await createGoogleSheet('evaluaciones', unidadFolderId), pId: await createGoogleSheet('ponderacion_unidad', unidadFolderId) });
+            // Crea la subcarpeta de Material Didáctico
+            const materialDidacticoFolderId = await findOrCreateFolder('Material Didáctico', unidadFolderId);
+            
+            unidadesDriveData.push({ 
+                numero: i, 
+                folderId: unidadFolderId,
+                materialId: materialDidacticoFolderId, // Nuevo ID
+                aId: await createGoogleSheet('Asistencia', unidadFolderId), 
+                acId: await createGoogleSheet('Actividades', unidadFolderId), 
+                rId: await createGoogleSheet('Reportes', unidadFolderId), 
+                eId: await createGoogleSheet('Evaluaciones', unidadFolderId), 
+                pId: await createGoogleSheet('Ponderacion_Unidad', unidadFolderId) 
+            });
         }
 
+        // 2. Persistencia en Supabase
         let { data: semData } = await supabase.from('semestres').select('id').eq('nombre', materia.semestre).eq('docente_id', docenteId).single();
         if (!semData) { const { data } = await supabase.from('semestres').insert({ nombre: materia.semestre, docente_id: docenteId, drive_folder_id: semestreId }).select('id').single(); semData = data; }
 
         const { data: matData } = await supabase.from('materias').insert({ nombre: materia.nombre, unidades_count: materia.unidades, semestre_id: semData.id, docente_id: docenteId, drive_folder_id: materiaFolderId }).select('id').single();
-        const unidadesInsert = unidadesDriveData.map(u => ({ numero_unidad: u.numero, materia_id: matData.id, ponderacion: 0, drive_folder_id: u.folderId, asistencia_sheet_id: u.aId, actividades_sheet_id: u.acId, reportes_sheet_id: u.rId, evaluaciones_sheet_id: u.eId, ponderacion_sheet_id: u.pId }));
+        
+        const unidadesInsert = unidadesDriveData.map(u => ({ 
+            numero_unidad: u.numero, 
+            materia_id: matData.id, 
+            ponderacion: 0, 
+            drive_folder_id: u.folderId, 
+            material_didactico_folder_id: u.materialId, // Nuevo campo
+            asistencia_sheet_id: u.aId, 
+            actividades_sheet_id: u.acId, 
+            reportes_sheet_id: u.rId, 
+            evaluaciones_sheet_id: u.eId, 
+            ponderacion_sheet_id: u.pId 
+        }));
         await supabase.from('unidades').insert(unidadesInsert);
         
-        res.status(200).send({ message: 'Estructura creada y registrada.', materiaDriveFolderId: materiaFolderId, materiaDbId: matData.id });
-    } catch (error) { const status = error.message.includes('autenticación') ? 401 : 500; res.status(status).send({ message: `Error: ${error.message}` }); }
+        // 3. Inicialización de Hojas de Cálculo (Estructuración)
+        for (const unidad of unidadesDriveData) {
+            await initAsistenciaSheet(unidad.aId);
+            await initActividadesSheet(unidad.acId);
+            await initPonderacionSheet(unidad.pId);
+        }
+
+        res.status(200).send({ message: 'Estructura creada, compartida y registrada.', materiaDriveFolderId: materiaFolderId, materiaDbId: matData.id });
+    } catch (error) { 
+        console.error("Error en createMateriaStructure:", error);
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
+    }
 });
 
+// -- 6.2 GESTIÓN DE MATERIAS (LISTAR) --
 functions.http('listMaterias', async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'GET'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+    if (req.method !== 'GET') { res.status(405).send('Método no permitido'); return; }
+
     try {
         const user = await getAuthenticatedUser(req);
-        const { data, error } = await supabase.from('semestres').select(`nombre, drive_folder_id, materias (id, nombre, drive_folder_id, visible)`).eq('docente_id', user.id);
+        const { data, error } = await supabase.from('semestres')
+            .select(`
+                nombre, 
+                drive_folder_id, 
+                materias (id, nombre, drive_folder_id, visible)
+            `)
+            .eq('docente_id', user.id);
+            
         if (error) throw error;
-        const resultado = data.map(s => ({ semestre: s.nombre, semestreId: s.drive_folder_id, materias: s.materias.map(m => ({ dbId: m.id, nombre: m.nombre, materiaId: m.drive_folder_id, visible: m.visible })) }));
+        
+        const resultado = data.map(s => ({ 
+            semestre: s.nombre, 
+            semestreId: s.drive_folder_id, 
+            materias: s.materias.map(m => ({ 
+                dbId: m.id, 
+                nombre: m.nombre, 
+                materiaId: m.drive_folder_id, 
+                visible: m.visible 
+            })) 
+        }));
+        
         res.status(200).send(resultado);
-    } catch (error) { const status = error.message.includes('autenticación') ? 401 : 500; res.status(status).send({ message: `Error: ${error.message}` }); }
+    } catch (error) { 
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
+    }
 });
 
+// -- 6.3 GESTIÓN DE MATERIAS (ELIMINAR) --
 functions.http('deleteMateria', async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+    if (req.method !== 'POST') { res.status(405).send('Método no permitido'); return; }
+    
+    try {
+        const user = await getAuthenticatedUser(req);
+        const { materiaDbId } = req.body;
+        if (!materiaDbId) return res.status(400).send({ message: 'ID de materia es requerido.' });
+        
+        // 1. Obtener la información de la materia y su folder (y verificar propiedad)
+        const { data: materiaData, error: fetchError } = await supabase
+            .from('materias')
+            .select('drive_folder_id')
+            .eq('id', materiaDbId)
+            .eq('docente_id', user.id)
+            .single();
+
+        if (fetchError || !materiaData) throw new Error('Materia no encontrada o no autorizada.');
+
+        // 2. Eliminar registros de la base de datos (ON DELETE CASCADE se encarga de las unidades)
+        const { error: deleteError } = await supabase.from('materias').delete().eq('id', materiaDbId);
+        if (deleteError) throw deleteError;
+        
+        // 3. Eliminar la carpeta de Drive (MOVER A LA PAPELERA - Safer Delete)
+        await drive.files.update({
+            fileId: materiaData.drive_folder_id,
+            resource: { trashed: true }
+        });
+        
+        res.status(200).send({ message: 'Materia eliminada (enviada a la papelera de Drive) y borrada de la base de datos.' });
+
+    } catch (error) {
+        console.error("Error en deleteMateria:", error);
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
+    }
+});
+
+// -- 6.4 GESTIÓN DE ESTUDIANTES (MATRÍCULA EN SHEETS) --
+functions.http('addStudentsToMateria', async (req, res) => {
     res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
     try {
         const user = await getAuthenticatedUser(req);
-        const { materiaId } = req.body;
-        if (!materiaId) return res.status(400).send({ message: 'Se requiere "materiaId".' });
-        const { data } = await supabase.from('materias').select('drive_folder_id').eq('id', materiaId).eq('docente_id', user.id).single();
-        if (!data) throw new Error('Materia no encontrada o sin permiso.');
-        await supabase.from('materias').delete().eq('id', materiaId);
-        await drive.files.delete({ fileId: data.drive_folder_id });
-        res.status(200).send({ message: 'Materia eliminada completamente.' });
-    } catch (error) { const status = error.message.includes('autenticación') ? 401 : 500; res.status(status).send({ message: `Error: ${error.message}` }); }
-});
-// --- NUEVA FUNCIÓN PARA COMPARTIR CARPETAS ---
+        const { materiaDbId, students } = req.body;
 
-/**
- * Cloud Function que comparte una carpeta de Drive con un usuario específico.
- * Le otorga permisos de "escritor" (editor) para que pueda modificar el contenido.
- */
-functions.http('shareFolderWithUser', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
+        if (!materiaDbId || !students || students.length === 0) return res.status(400).send({ message: 'Datos de materia o estudiantes incompletos.' });
 
-    try {
-        // 1. Extraer los datos de la solicitud
-        const { folderId, emailAddress } = req.body;
-        if (!folderId || !emailAddress) {
-            return res.status(400).send({ message: 'Se requiere "folderId" y "emailAddress".' });
-        }
-
-        console.log(`Compartiendo carpeta ${folderId} con ${emailAddress}...`);
-
-        // 2. Crear el permiso en la API de Drive
-        await drive.permissions.create({
-            fileId: folderId,
-            requestBody: {
-                role: 'writer', // 'writer' es el rol de editor. Puede ver, editar y añadir archivos.
-                type: 'user',   // Estamos compartiendo con un usuario específico.
-                emailAddress: emailAddress
-            }
-        });
-
-        console.log('¡Carpeta compartida exitosamente!');
-        
-        // 3. Enviar una respuesta de éxito
-        res.status(200).send({ message: `Carpeta ${folderId} compartida exitosamente con ${emailAddress}.` });
-
-    } catch (error) {
-        console.error('Error al compartir la carpeta:', error);
-        res.status(500).send({ message: 'Error interno del servidor al compartir la carpeta.' });
-    }
-});
-/**
- * VERSIÓN HÍBRIDA: Elimina la materia de la base de datos de Supabase
- * y luego borra la carpeta correspondiente de Google Drive.
- */
-functions.http('deleteMateria', async (req, res) => {
-    // ... (el código de CORS se mantiene igual) ...
-    res.set('Access-control-allow-origin', '*');
-    res.set('Access-control-allow-methods', 'POST');
-    res.set('Access-control-allow-headers', 'Content-Type');
-    if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
-
-    try {
-        // AHORA RECIBIMOS EL ID DE LA BASE DE DATOS, no el de la carpeta
-        const { materiaId } = req.body;
-        if (!materiaId) {
-            return res.status(400).send({ message: 'Se requiere "materiaId" de la base de datos.' });
-        }
-
-        // -- NUEVO: Obtener el ID del docente desde el token (lo implementaremos después) --
-        const docenteId = "PEGA_AQUI_EL_UID_DE_UN_USUARIO_DOCENTE_DE_PRUEBA";
-
-        console.log(`Solicitud para eliminar la materia con DB ID: ${materiaId}`);
-
-        // 1. Obtener el ID de la carpeta de Drive desde Supabase
-        const { data: materiaData, error: selectError } = await supabase
+        // 1. Verificar propiedad y obtener sheets IDs de todas las unidades
+        const { data: unidadesData, error: fetchError } = await supabase
             .from('materias')
-            .select('drive_folder_id')
-            .eq('id', materiaId)
-            .eq('docente_id', docenteId) // Asegurarnos de que el docente es el propietario
+            .select('unidades (asistencia_sheet_id, actividades_sheet_id, reportes_sheet_id, evaluaciones_sheet_id)')
+            .eq('id', materiaDbId)
+            .eq('docente_id', user.id) // Seguridad
             .single();
 
-        if (selectError || !materiaData) {
-            throw new Error('Materia no encontrada o no tienes permiso para eliminarla.');
+        if (fetchError || !unidadesData) throw new Error('Materia no encontrada o no autorizada.');
+
+        // 2. Preparar datos para escribir (solo Matrícula y Nombre)
+        const studentValues = students.map(s => [s.matricula, s.nombre]);
+        
+        // 3. Escribir estudiantes en CADA hoja de unidad (Columnas A y B)
+        // Obtenemos todos los IDs de Sheets de todas las unidades
+        const allSheetIds = unidadesData.unidades.flatMap(u => [
+            u.asistencia_sheet_id, 
+            u.actividades_sheet_id, 
+            u.reportes_sheet_id, 
+            u.evaluaciones_sheet_id
+        ]);
+        
+        for (const sheetId of allSheetIds) {
+            await sheets.spreadsheets.values.append({
+                spreadsheetId: sheetId,
+                range: 'A2', 
+                valueInputOption: 'USER_ENTERED',
+                requestBody: { values: studentValues }
+            });
         }
-
-        const folderIdToDelete = materiaData.drive_folder_id;
-
-        // 2. Eliminar la materia de la base de datos de Supabase.
-        // Gracias a la configuración "ON DELETE CASCADE", al eliminar la materia,
-        // Supabase eliminará automáticamente todas sus unidades, materiales, etc.
-        const { error: deleteError } = await supabase
-            .from('materias')
-            .delete()
-            .eq('id', materiaId);
-
-        if (deleteError) {
-            throw deleteError;
-        }
-        console.log(`Registro de la materia ${materiaId} eliminado de Supabase.`);
-
-        // 3. Eliminar la carpeta de Google Drive
-        await drive.files.delete({
-            fileId: folderIdToDelete,
-        });
-
-        console.log(`Carpeta de Drive ${folderIdToDelete} eliminada exitosamente.`);
-
-        res.status(200).send({ message: `La materia ha sido eliminada completamente.` });
+        
+        res.status(200).send({ message: `Se matricularon ${students.length} estudiantes y se actualizaron ${allSheetIds.length} hojas.` });
 
     } catch (error) {
-        console.error(`Error al eliminar la materia ${req.body.materiaId}:`, error);
-        res.status(500).send({ message: `Error interno: ${error.message}` });
+        console.error("Error en addStudentsToMateria:", error);
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
     }
 });
-/**
- * VERSIÓN SEGURA: Lee las materias del docente autenticado.
- */
-functions.http('listMaterias', async (req, res) => {
-    // ... (el código de CORS se mantiene igual) ...
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); // <-- AÑADIR 'Authorization'
-    if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
 
-    try {
-        // 1. OBTENER EL USUARIO AUTENTICADO
-        const user = await getAuthenticatedUser(req);
-        const docenteId = user.id;
 
-        console.log(`Buscando materias para el docente ${docenteId} en Supabase...`);
-
-        // 2. Hacer la consulta a Supabase (el resto del código es igual)
-        const { data, error } = await supabase
-            .from('semestres')
-            .select(`
-                nombre,
-                drive_folder_id,
-                materias ( nombre, drive_folder_id, visible )
-            `)
-            .eq('docente_id', docenteId);
-
-        if (error) throw error;
-
-        // ... (el resto de la función para formatear y enviar la respuesta es igual) ...
-        const resultadoFinal = data.map(semestre => ({
-            semestre: semestre.nombre,
-            semestreId: semestre.drive_folder_id,
-            materias: semestre.materias.map(materia => ({
-                nombre: materia.nombre,
-                materiaId: materia.drive_folder_id,
-                visible: materia.visible
-            }))
-        }));
-        res.status(200).send(resultadoFinal);
-
-    } catch (error) {
-        console.error('Error en listMaterias (seguro):', error);
-        // Si el error es de autenticación, enviamos un código 401 (No autorizado)
-        if (error.message.includes('autenticación') || error.message.includes('token')) {
-            res.status(401).send({ message: error.message });
-        } else {
-            res.status(500).send({ message: `Error interno: ${error.message}` });
-        }
-    }
-});
-// --- NUEVA FUNCIÓN PARA LA ASISTENCIA QR ---
-
-/**
- * Cloud Function que genera un código de asistencia único y temporal para una
- * hoja de cálculo de asistencia específica.
- * Almacena el código y una marca de tiempo como propiedades personalizadas en el archivo de Drive.
- */
+// -- 6.5 GESTIÓN DE ASISTENCIA QR (GENERAR CÓDIGO) --
 functions.http('generateAttendanceCode', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
-
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
     try {
+        await getAuthenticatedUser(req); // Solo el docente autenticado puede generar el código
         const { sheetId } = req.body;
-        if (!sheetId) {
-            return res.status(400).send({ message: 'Se requiere "sheetId".' });
-        }
+        if (!sheetId) return res.status(400).send({ message: 'Se requiere "sheetId".' });
 
-        // 1. Generar un código de sesión único y una marca de tiempo
-        // El código es una cadena aleatoria y la marca de tiempo es la hora actual en milisegundos
+        // 1. Generar código y timestamp
         const attendanceCode = Math.random().toString(36).substring(2, 10).toUpperCase();
         const timestamp = Date.now().toString();
 
-        console.log(`Generando código de asistencia para el Sheet ${sheetId}: ${attendanceCode}`);
-
-        // 2. Actualizar las propiedades del archivo en Drive para almacenar la sesión
-        // Esto es como ponerle una "etiqueta" invisible al archivo con la información de la sesión.
+        // 2. Almacenar la sesión en las propiedades del archivo de Drive
         await drive.files.update({
             fileId: sheetId,
             requestBody: {
-                properties: {
-                    'attendance_code': attendanceCode,
-                    'session_start_time': timestamp
-                }
+                properties: { 'attendance_code': attendanceCode, 'session_start_time': timestamp }
             }
         });
-
-        console.log("Código de asistencia guardado en las propiedades del archivo.");
         
-        // 3. Enviar el código de vuelta al frontend para que pueda generar el QR
-        res.status(200).send({
-            message: 'Código de asistencia generado exitosamente.',
-            attendanceCode: attendanceCode
-        });
+        res.status(200).send({ message: 'Código de asistencia generado.', attendanceCode: attendanceCode });
 
     } catch (error) {
         console.error(`Error al generar el código de asistencia para ${req.body.sheetId}:`, error);
-        res.status(500).send({ message: 'Error interno del servidor al generar el código.' });
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
     }
 });
-// --- NUEVA FUNCIÓN PARA REGISTRAR ASISTENCIA DE ESTUDIANTES ---
 
-/**
- * Cloud Function que un estudiante usa para registrar su asistencia.
- * Valida un código, encuentra la hoja de asistencia correspondiente y escribe una nueva fila.
- */
+// -- 6.6 GESTIÓN DE ASISTENCIA QR (REGISTRAR ALUMNO) --
 functions.http('registerAttendance', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
 
     try {
-        const { attendanceCode, studentId } = req.body;
-        if (!attendanceCode || !studentId) {
-            return res.status(400).send({ message: 'Se requiere "attendanceCode" y "studentId".' });
-        }
+        const { attendanceCode, matricula } = req.body;
+        if (!attendanceCode || !matricula) return res.status(400).send({ message: 'Se requiere "attendanceCode" y "matricula".' });
 
-        console.log(`Intento de registro para el código ${attendanceCode} por el estudiante ${studentId}`);
-
-        // 1. Buscar el archivo de asistencia que tenga el código activo en sus propiedades
+        // 1. Buscar archivo de asistencia con el código activo y propiedades
         const query = `properties has { key='attendance_code' and value='${attendanceCode}' } and trashed=false`;
         const fileResponse = await drive.files.list({
-            q: query,
-            fields: 'files(id, properties, name)',
-            spaces: 'drive',
+            q: query, fields: 'files(id, properties)', spaces: 'drive',
         });
 
-        if (fileResponse.data.files.length === 0) {
-            console.log("Código de asistencia no encontrado o inválido.");
-            return res.status(404).send({ message: 'Código de asistencia no válido o la sesión ha expirado.' });
-        }
+        if (fileResponse.data.files.length === 0) return res.status(404).send({ message: 'Código de asistencia no válido o la sesión no está activa.' });
 
         const sheetFile = fileResponse.data.files[0];
         const sheetId = sheetFile.id;
         const sessionStartTime = parseInt(sheetFile.properties.session_start_time, 10);
-
-        // 2. Validar que la sesión no haya expirado (ej. 15 minutos de validez)
+        
+        // 2. Validar que la sesión no haya expirado (15 minutos)
         const SESSION_DURATION_MS = 15 * 60 * 1000;
         if (Date.now() - sessionStartTime > SESSION_DURATION_MS) {
-            console.log("La sesión de asistencia ha expirado.");
-            // Opcional: Podríamos borrar las propiedades del archivo para invalidar el código permanentemente
-            return res.status(403).send({ message: 'La sesión de asistencia ha expirado.' });
+            return res.status(403).send({ message: 'La sesión de asistencia ha expirado. Contacta a tu docente.' });
         }
 
-        // 3. Escribir la asistencia en la hoja de cálculo
-        const timestamp = new Date().toLocaleString('es-MX', { timeZone: 'America/Merida' });
-        const values = [[studentId, timestamp]]; // Los datos a añadir: [[valor_columna_A, valor_columna_B]]
+        // 3. Escribir la matrícula y el timestamp en la hoja de cálculo
+        const timestamp = new Date().toLocaleString('es-MX'); 
+        const values = [[matricula, timestamp]]; // Registra Matrícula y Timestamp (se asume que es una nueva columna por día en initAsistenciaSheet)
+        
+        // NOTA: Para un registro de asistencia por día, necesitaríamos encontrar la columna 
+        // de la fecha actual. Aquí, simplemente anexamos una nueva fila, asumiendo que 
+        // el frontend/post-proceso se encarga de la lógica Matrícula vs Columna Día.
+        // Para simplificar la conexión al frontend, usaremos la función append (nueva fila).
         
         await sheets.spreadsheets.values.append({
             spreadsheetId: sheetId,
-            range: 'A1', // Sheets es lo suficientemente inteligente para encontrar la primera fila vacía a partir de A1
+            range: 'A1', // Escribe al final de la hoja, a partir de la columna A
             valueInputOption: 'USER_ENTERED',
-            resource: { values },
+            requestBody: { values: values },
         });
         
-        console.log(`Asistencia registrada para ${studentId} en la hoja ${sheetFile.name}`);
-        
-        res.status(200).send({ message: `¡Asistencia registrada con éxito para ${studentId}!` });
+        res.status(200).send({ message: `¡Asistencia registrada con éxito para la matrícula ${matricula}!` });
 
     } catch (error) {
         console.error('Error al registrar la asistencia:', error);
         res.status(500).send({ message: 'Error interno del servidor al registrar la asistencia.' });
     }
 });
-// --- NUEVA FUNCIÓN PARA LISTAR MATERIAL DIDÁCTICO ---
 
-/**
- * Cloud Function que lista todos los archivos dentro de una carpeta específica de Drive.
- * Ideal para mostrar al docente el material didáctico de una unidad.
- */
+
+// -- 6.7 GESTIÓN DE MATERIAL DIDÁCTICO (LISTAR ARCHIVOS) --
 functions.http('listUnitFiles', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST'); // Usamos POST para recibir el folderId en el body
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
-
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
     try {
+        await getAuthenticatedUser(req); // Solo docentes autenticados
         const { folderId } = req.body;
-        if (!folderId) {
-            return res.status(400).send({ message: 'Se requiere "folderId".' });
-        }
+        if (!folderId) return res.status(400).send({ message: 'Se requiere "folderId".' });
 
-        console.log(`Listando archivos para la carpeta ${folderId}`);
-
-        // 1. Construir la consulta para buscar archivos dentro de la carpeta padre
-        const query = `'${folderId}' in parents and trashed=false`;
-
-        // 2. Llamar a la API de Drive para obtener la lista de archivos
+        const query = `'${folderId}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'`; // Excluye subcarpetas
         const response = await drive.files.list({
             q: query,
-            // Pedimos los campos que nos interesan para cada archivo
             fields: 'files(id, name, mimeType, webViewLink, iconLink)', 
         });
 
-        const files = response.data.files;
-        console.log(`Se encontraron ${files.length} archivos.`);
-        
-        // 3. Enviar la lista de archivos de vuelta al frontend
-        res.status(200).send(files);
+        res.status(200).send(response.data.files);
 
     } catch (error) {
         console.error(`Error al listar los archivos de la carpeta ${req.body.folderId}:`, error);
-        res.status(500).send({ message: 'Error interno del servidor al listar los archivos.' });
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
     }
 });
-// --- NUEVA FUNCIÓN PARA CREAR EVALUACIONES ---
 
-/**
- * Cloud Function que crea un nuevo Google Form para una evaluación
- * y lo mueve a la carpeta de la unidad correspondiente.
- */
-functions.http('createEvaluationForm', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
 
+// -- 6.8 GESTIÓN DE MATERIAL DIDÁCTICO (PERMISOS DE ARCHIVO) --
+functions.http('updateFilePermissions', async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
     try {
-        const { title, parentFolderId } = req.body;
-        if (!title || !parentFolderId) {
-            return res.status(400).send({ message: 'Se requiere "title" y "parentFolderId".' });
+        await getAuthenticatedUser(req); // Solo docentes
+        const { fileId, isPublic, allowDownload } = req.body;
+        if (!fileId || isPublic === undefined || allowDownload === undefined) {
+            return res.status(400).send({ message: 'Se requieren "fileId", "isPublic" y "allowDownload".' });
         }
 
-        console.log(`Creando evaluación con título: "${title}"`);
+        // 1. Gestión de visibilidad (Permiso 'anyone')
+        if (isPublic) {
+            await shareDriveItem(fileId, 'anyone', 'reader'); // Compartir con 'anyone'
+        } else {
+            // Eliminar el permiso 'anyone' (hacer privado)
+            try { await drive.permissions.delete({ fileId: fileId, permissionId: 'anyone' }); } 
+            catch (error) { if (error.code !== 404) throw error; } // Ignorar 404 si el permiso ya no existe
+        }
+        
+        // 2. Gestión de descarga (Solo para archivos que NO son folders o Sheets/Docs/etc. de Google)
+        // Nota: Las Hojas de Google (Sheets) requieren un manejo diferente para la descarga,
+        // pero esta operación Drive.files.update sí afecta a archivos cargados (PDF, JPG, etc.).
+        await drive.files.update({
+            fileId: fileId,
+            requestBody: {
+                viewersCanCopyContent: allowDownload // Controla la descarga/copia/impresión
+            }
+        });
+        
+        res.status(200).send({ message: `Permisos del archivo ${fileId} actualizados. Público: ${isPublic}, Descarga: ${allowDownload}.` });
 
-        // 1. Crear el Google Form
+    } catch (error) {
+        console.error(`Error al actualizar permisos del archivo ${req.body.fileId}:`, error);
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
+    }
+});
+
+
+// -- 6.9 GESTIÓN DE EVALUACIONES (CREACIÓN DE FORM) --
+functions.http('createEvaluationForm', async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
+    try {
+        await getAuthenticatedUser(req); // Solo docentes
+        const { title, parentFolderId } = req.body;
+        if (!title || !parentFolderId) return res.status(400).send({ message: 'Se requiere "title" y "parentFolderId".' });
+
+        // 1. Crear el Google Form (se crea en la raíz por defecto)
         const form = await forms.forms.create({
             requestBody: {
-                info: {
-                    title: title,
-                    documentTitle: title // El nombre del archivo
-                }
+                info: { title: title, documentTitle: title }
             }
         });
 
         const formId = form.data.formId;
         const formUrl = form.data.responderUri;
-        console.log(`Formulario creado con ID: ${formId}`);
-
-        // 2. Mover el formulario a la carpeta de la unidad correspondiente
-        // Los formularios se crean en la raíz del Drive, necesitamos moverlos.
-        // Primero, obtenemos la información del archivo para saber su ID de Drive.
-        const file = await drive.files.get({
-            fileId: formId,
-            fields: 'parents' // Necesitamos saber dónde está actualmente (en la raíz)
-        });
-
-        // Luego, lo actualizamos para cambiar su "padre" a la carpeta de la unidad
+        
+        // 2. Mover el formulario a la carpeta de la unidad
+        const file = await drive.files.get({ fileId: formId, fields: 'parents' });
         await drive.files.update({
             fileId: formId,
             addParents: parentFolderId,
-            removeParents: file.data.parents.join(','), // Lo quitamos de la raíz
+            removeParents: file.data.parents.join(','), 
             fields: 'id, parents'
         });
-
-        console.log(`Formulario ${formId} movido a la carpeta ${parentFolderId}`);
         
-        // 3. Devolver la información del formulario creado
         res.status(200).send({
             message: 'Evaluación creada exitosamente.',
             formId: formId,
@@ -614,156 +521,52 @@ functions.http('createEvaluationForm', async (req, res) => {
 
     } catch (error) {
         console.error(`Error al crear la evaluación:`, error);
-        res.status(500).send({ message: 'Error interno del servidor al crear la evaluación.' });
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
     }
 });
-// --- NUEVA FUNCIÓN PARA LEER DATOS DE HOJAS DE CÁLCULO ---
 
-/**
- * Cloud Function que lee y devuelve todos los datos de una hoja de cálculo de Google.
- */
+// -- 6.10 UTILIDAD (LEER DATOS DE SHEET) --
 functions.http('getSheetData', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST'); // Usamos POST para recibir el sheetId en el body
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
-
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
     try {
-        const { sheetId } = req.body;
-        if (!sheetId) {
-            return res.status(400).send({ message: 'Se requiere "sheetId".' });
-        }
+        // No requiere autenticación si la hoja fue compartida públicamente o con el usuario autenticado
+        const { sheetId, range } = req.body; 
+        if (!sheetId) return res.status(400).send({ message: 'Se requiere "sheetId".' });
 
-        console.log(`Leyendo datos del Sheet con ID: ${sheetId}`);
-
-        // 1. Llamar a la API de Google Sheets para obtener los valores
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: sheetId,
-            range: 'A1:Z', // Un rango amplio para asegurar que leemos toda la hoja
+            range: range || 'A1:Z', 
         });
 
-        const rows = response.data.values || []; // Si la hoja está vacía, 'values' puede no existir
-        console.log(`Se encontraron ${rows.length} filas de datos.`);
-        
-        // 2. Enviar los datos de vuelta al frontend
-        // El resultado es un arreglo de arreglos, donde cada arreglo interno es una fila.
-        // Ejemplo: [ ["Matrícula", "Fecha"], ["001", "03/10/2025"], ["002", "03/10/2025"] ]
-        res.status(200).send(rows);
+        res.status(200).send(response.data.values || []);
 
     } catch (error) {
         console.error(`Error al leer los datos del Sheet ${req.body.sheetId}:`, error);
         res.status(500).send({ message: 'Error interno del servidor al leer la hoja de cálculo.' });
     }
 });
-// --- NUEVA FUNCIÓN PARA ESCRIBIR/ACTUALIZAR DATOS EN HOJAS DE CÁLCULO ---
 
-/**
- * Cloud Function que escribe o actualiza datos en un rango específico de una hoja de cálculo.
- */
+// -- 6.11 UTILIDAD (ESCRIBIR DATOS EN SHEET) --
 functions.http('updateSheetData', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
-
+    res.set('Access-Control-Allow-Origin', '*'); res.set('Access-Control-Allow-Methods', 'POST'); res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization'); if (req.method === 'OPTIONS') { res.status(204).send(''); return; }
     try {
+        await getAuthenticatedUser(req); // Solo docentes
         const { sheetId, range, values } = req.body;
-        if (!sheetId || !range || !values) {
-            return res.status(400).send({ message: 'Se requiere "sheetId", "range" y "values".' });
-        }
+        if (!sheetId || !range || !values) return res.status(400).send({ message: 'Se requiere "sheetId", "range" y "values".' });
 
-        console.log(`Escribiendo en Sheet ${sheetId}, rango ${range}`);
-
-        // 1. Llamar a la API de Google Sheets para actualizar los valores
         const response = await sheets.spreadsheets.values.update({
             spreadsheetId: sheetId,
-            range: range, // El rango específico a escribir, ej: 'Hoja1!C2:D3'
-            valueInputOption: 'USER_ENTERED', // Interpreta los datos como si un usuario los escribiera
-            resource: {
-                values: values, // Los datos a escribir, en formato de arreglo de arreglos.
-                                // Ejemplo para una celda: [['100']]
-                                // Ejemplo para dos filas: [['Actividad 1', '100'], ['Actividad 2', '80']]
-            },
+            range: range,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: { values: values },
         });
-
-        console.log("Datos actualizados exitosamente.");
         
-        // 2. Enviar una confirmación de éxito
-        res.status(200).send({
-            message: 'Datos actualizados exitosamente en la hoja de cálculo.',
-            updatedRange: response.data.updatedRange
-        });
+        res.status(200).send({ message: 'Datos actualizados exitosamente.', updatedRange: response.data.updatedRange });
 
     } catch (error) {
         console.error(`Error al escribir en el Sheet ${req.body.sheetId}:`, error);
-        res.status(500).send({ message: 'Error interno del servidor al escribir en la hoja de cálculo.' });
-    }
-});
-// --- FUNCIÓN FINAL PARA GESTIONAR PERMISOS DE MATERIALES ---
-
-/**
- * Cloud Function que actualiza los permisos de un archivo en Drive.
- * Puede hacer un archivo público (visible para cualquiera con el enlace) o privado.
- */
-functions.http('updateFilePermissions', async (req, res) => {
-    // Configuración de CORS
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'POST');
-    res.set('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        res.status(204).send('');
-        return;
-    }
-
-    try {
-        const { fileId, isPublic } = req.body;
-        if (!fileId || isPublic === undefined) {
-            return res.status(400).send({ message: 'Se requiere "fileId" y un estado "isPublic" (true/false).' });
-        }
-
-        console.log(`Actualizando permisos para el archivo ${fileId}. Hacerlo público: ${isPublic}`);
-
-        if (isPublic) {
-            // HACE EL ARCHIVO PÚBLICO (CUALQUIERA CON EL ENLACE PUEDE VER)
-            await drive.permissions.create({
-                fileId: fileId,
-                requestBody: {
-                    role: 'reader', // Rol de 'lector'
-                    type: 'anyone'  // Para 'cualquier persona'
-                }
-            });
-            console.log("El archivo ahora es público.");
-        } else {
-            // HACE EL ARCHIVO PRIVADO (ELIMINA EL PERMISO PÚBLICO)
-            try {
-                await drive.permissions.delete({
-                    fileId: fileId,
-                    permissionId: 'anyone' // El ID del permiso público es siempre 'anyone'
-                });
-                console.log("El archivo ahora es privado.");
-            } catch (error) {
-                // Si el permiso 'anyone' no existía, la API da un error.
-                // Lo ignoramos de forma segura porque el resultado deseado (que sea privado) ya se cumple.
-                if (error.code === 404) {
-                    console.log("El archivo ya era privado. No se realizaron cambios.");
-                } else {
-                    throw error; // Si es otro error, sí lo lanzamos.
-                }
-            }
-        }
-        
-        res.status(200).send({ message: `Permisos del archivo ${fileId} actualizados correctamente.` });
-
-    } catch (error) {
-        console.error(`Error al actualizar los permisos del archivo ${req.body.fileId}:`, error);
-        res.status(500).send({ message: 'Error interno del servidor al actualizar los permisos.' });
+        const status = error.message.includes('autenticación') ? 401 : 500; 
+        res.status(status).send({ message: `Error: ${error.message}` }); 
     }
 });
