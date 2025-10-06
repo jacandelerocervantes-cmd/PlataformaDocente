@@ -570,3 +570,83 @@ functions.http('updateSheetData', async (req, res) => {
         res.status(status).send({ message: `Error: ${error.message}` }); 
     }
 });
+// -- 6.12 GESTIÓN DE UNIDADES (OBTENER DETALLES) --
+functions.http('getUnitDetails', async (req, res) => {
+    // --- Configuración de CORS y método ---
+ res.set('Access-Control-Allow-Origin', '*');
+ res.set('Access-Control-Allow-Methods', 'POST');
+ res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    if (req.method === 'OPTIONS') {
+        res.status(204).send('');
+        return;
+ }
+ if (req.method !== 'POST') {
+ res.status(405).send({ message: 'Método no permitido. Usa POST.' });
+ return;
+ }
+
+ try {
+        // --- 1. Autenticación y Validación ---
+ const user = await getAuthenticatedUser(req);
+ const { materiaDbId, unitNumber } = req.body;
+
+ if (!materiaDbId || !unitNumber) {
+ return res.status(400).send({ message: 'Se requiere "materiaDbId" y "unitNumber".' });
+ }
+
+        // --- 2. Consulta a Supabase para obtener los detalles de la unidad ---
+        // Se realiza una consulta a la tabla 'unidades' y se une con 'materias'
+        // para verificar que la materia pertenece al docente autenticado.
+ const { data: unitData, error: fetchError } = await supabase
+.from('unidades')
+ .select(`
+ *,
+ materia:materias ( docente_id ) 
+ `)
+.eq('materia_id', materiaDbId)
+ .eq('numero_unidad', unitNumber)
+ .single(); // .single() espera un único resultado
+
+// --- 3. Verificación de permisos y existencia ---
+ if (fetchError || !unitData) {
+ throw new Error('Unidad no encontrada.');
+ }
+ if (unitData.materia.docente_id !== user.id) {
+return res.status(403).send({ message: 'No tienes permiso para acceder a esta unidad.' });
+ }
+        
+        // Se elimina la información anidada de la materia para limpiar la respuesta.
+        delete unitData.materia; 
+
+        // --- 4. (Opcional pero recomendado) Leer ponderaciones actuales del Sheet ---
+        // Se leen los valores de la hoja de ponderación para devolverlos al frontend.
+        let ponderaciones = { asistencia: 0, actividades: 0, reportes: 0, evaluaciones: 0 };
+        try {
+            const ponderacionResponse = await sheets.spreadsheets.values.get({
+                spreadsheetId: unitData.ponderacion_sheet_id,
+                range: 'Ponderación de Unidad!B2:B5',
+            });
+            const values = ponderacionResponse.data.values;
+            if (values) {
+                ponderaciones.asistencia = parseFloat(values[0]?.[0]) || 0;
+                ponderaciones.actividades = parseFloat(values[1]?.[0]) || 0;
+                ponderaciones.reportes = parseFloat(values[2]?.[0]) || 0;
+                ponderaciones.evaluaciones = parseFloat(values[3]?.[0]) || 0;
+            }
+        } catch (sheetError) {
+            console.warn(`No se pudieron leer las ponderaciones para la unidad ${unitNumber} de la materia ${materiaDbId}. Error: ${sheetError.message}`);
+            // No se lanza error, simplemente se devuelven las ponderaciones en 0.
+        }
+
+        // --- 5. Enviar la respuesta completa ---
+  res.status(200).send({ 
+            ...unitData, 
+            ponderacionesActuales: ponderaciones 
+        });
+
+    } catch (error) {
+ console.error("Error en getUnitDetails:", error);
+ const status = error.message.includes('autenticación') ? 401 : (error.message.includes('Unidad no encontrada') ? 404 : 500);
+res.status(status).send({ message: `Error: ${error.message}` }); 
+ }
+});
