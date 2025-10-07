@@ -1,0 +1,9 @@
+
+# 12. STUDENT_LOGIN (Autenticación de estudiante por Matrícula/Contraseña)
+gcloud functions deploy studentLogin --runtime nodejs20 --trigger-http --entry-point studentLogin --source . --region us-central1 --allow-unauthenticated --env-vars-file .env.yaml
+
+# 13. LIST_STUDENTS_IN_MATERIAgcloud functions deploy listStudentsInMateria --runtime nodejs20 --trigger-http --entry-point listStudentsInMateria --source . --region us-central1 --allow-unauthenticated --env-vars-file .env.yaml
+gcloud functions deploy listStudentsInMateria --runtime nodejs20 --trigger-http --entry-point listStudentsInMateria --source . --region us-central1 --allow-unauthenticated --env-vars-file .env.yaml
+
+# 14. SAVE_ATTENDANCE_TO_SHEET
+gcloud functions deploy saveAttendanceToSheet --runtime nodejs20 --trigger-http --entry-point saveAttendanceToSheet --source . --region us-central1 --allow-unauthenticated --env-vars-file .env.yaml
